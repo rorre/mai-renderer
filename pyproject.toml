@@ -1,0 +1,13 @@
+[project]
+name = "mai-renderer"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.4.0",
+    "requests>=2.32.5",
+    "scipy>=1.16.3",
+    "soundfile>=0.13.1",
+    "typed-argument-parser>=1.11.0",
+]
