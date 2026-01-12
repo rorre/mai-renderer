@@ -6,7 +6,6 @@ Sends control requests via HTTP POST to localhost:8013 to trigger recording
 
 import json
 import requests
-from typing import Optional
 from enum import Enum
 
 

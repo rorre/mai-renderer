@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from typing import Optional, List
 import re
 
+from mai_renderer.simai.tokenizer import BPM, AdvanceTime, Division, NoteGroup, tokenize_simai
+
 
 @dataclass
 class NoteData:
@@ -30,6 +32,7 @@ class NoteData:
     slide_end_position: int = 0  # For slide notes: destination position
     slide_direction: str = ""  # Slide direction character: - ^ v < > V p q s z w
     touch_area: str = ""  # For touch notes: A, B, C, D, E
+    pseudo_offset: int = 0  # Offset for pseudo notes
 
 
 @dataclass
@@ -39,8 +42,6 @@ class TimingPoint:
     time: float  # Time in seconds
     bpm: float
     notes: List[NoteData] = field(default_factory=list)
-    raw_text_position_y: int = 0
-    raw_text_position_x: int = 0
 
 
 @dataclass
@@ -50,7 +51,15 @@ class ChartMetadata:
     title: str = "default"
     artist: str = "default"
     designer: str = "default"
-    first_beat_time: float = 0.0  # Time in seconds before first beat
+    first_beat_time: float = 0.0  # Time in seconds for the first beat
+    # Levels:
+    # 0: "EASY",
+    # 1: "BASIC",
+    # 2: "ADVANCED",
+    # 3: "EXPERT",
+    # 4: "MASTER",
+    # 5: "Re:MASTER",
+    # 6: "ORIGINAL",
     levels: List[str] = field(default_factory=lambda: [""] * 7)
     other_commands: str = ""
 
@@ -166,7 +175,7 @@ class ChartLoader:
         - (BPM) - Set BPM
         - {beats} - Set time division
         - , - Advance time by one beat unit
-        - Note positions: 1-8 (8 buttons), E (extra/right side), A-E (touch areas)
+        - Note positions: 1-8 (8 buttons), A-E (touch areas)
         - Note modifiers: h (hold), slide marks (-^v<>Vpqszw), b (break), x (ex), f (fireworks), $ (star tap)
         - / - Separate notes in EACH (simultaneous notes)
         - || - Comment line
@@ -182,92 +191,25 @@ class ChartLoader:
         current_bpm = 120.0
         current_time = first_beat_time
         beats = 4  # Time division
-        y_pos = 0
-        x_pos = 0
 
-        i = 0
-        while i < len(simai_text):
-            char = simai_text[i]
+        for token in tokenize_simai(simai_text):
+            match token:
+                case BPM(new_bpm):
+                    current_bpm = new_bpm
+                case Division(new_divisor):
+                    beats = new_divisor
+                case AdvanceTime():
+                    current_time += 60.0 / current_bpm * (4.0 / beats)
+                case NoteGroup(notes):
+                    notes = ChartLoader._parse_note_group(notes, current_bpm)
 
-            # Track position
-            if char == "\n":
-                y_pos += 1
-                x_pos = 0
-                i += 1
-                continue
-
-            x_pos += 1
-
-            # Skip comments (||...)
-            if char == "|" and i + 1 < len(simai_text) and simai_text[i + 1] == "|":
-                while i < len(simai_text) and simai_text[i] != "\n":
-                    i += 1
-                continue
-
-            # Skip whitespace
-            if char in " \t\r":
-                i += 1
-                continue
-
-            # Parse BPM (120.5)
-            if char == "(":
-                i += 1
-                bpm_str = ""
-                while i < len(simai_text) and simai_text[i] != ")":
-                    bpm_str += simai_text[i]
-                    i += 1
-                try:
-                    current_bpm = float(bpm_str)
-                except ValueError:
-                    pass
-                i += 1  # Skip ')'
-                continue
-
-            # Parse time division {4}
-            if char == "{":
-                i += 1
-                beats_str = ""
-                while i < len(simai_text) and simai_text[i] != "}":
-                    beats_str += simai_text[i]
-                    i += 1
-                try:
-                    beats = int(beats_str)
-                except ValueError:
-                    pass
-                i += 1  # Skip '}'
-                continue
-
-            # Advance time (comma)
-            if char == ",":
-                current_time += 60.0 / current_bpm * (4.0 / beats)
-                i += 1
-                continue
-
-            # Check for end-of-difficulty marker (E followed by newline)
-            if char == "E" and (i + 1 >= len(simai_text) or simai_text[i + 1] == "\n"):
-                # This is end-of-difficulty, not a note - skip it
-                i += 1
-                continue
-
-            # Parse note group
-            if ChartLoader._is_note_start(simai_text, i):
-                note_group_start_x = x_pos - 1
-                notes, new_i = ChartLoader._parse_note_group(simai_text, i, current_bpm)
-
-                if notes:
-                    timing_point = TimingPoint(
-                        time=current_time,
-                        bpm=current_bpm,
-                        notes=notes,
-                        raw_text_position_y=y_pos,
-                        raw_text_position_x=note_group_start_x,
-                    )
-                    timing_points.append(timing_point)
-
-                i = new_i
-                continue
-
-            i += 1
+                    if notes:
+                        timing_point = TimingPoint(
+                            time=current_time,
+                            bpm=current_bpm,
+                            notes=notes,
+                        )
+                        timing_points.append(timing_point)
 
         return timing_points
 
@@ -286,7 +228,7 @@ class ChartLoader:
         return False
 
     @staticmethod
-    def _parse_note_group(simai_text: str, start_pos: int, current_bpm: float) -> tuple:
+    def _parse_note_group(simai_text: str, current_bpm: float) -> list[NoteData]:
         """
         Parse a note group which may contain:
         - Single note: 1, 2h[3:4], A5f, etc.
@@ -295,99 +237,31 @@ class ChartLoader:
         Returns:
             Tuple of (notes list, new position in text)
         """
-        notes = []
-        i = start_pos
+        notes: list[NoteData] = []
+        offset = 0  # For pseudo-EACH
 
-        # Check if this is an EACH group (contains /)
-        # We need to look ahead to see if there's a / before the comma
-        lookahead = i
-        paren_depth = 0
-        has_slash = False
-        while lookahead < len(simai_text) and simai_text[lookahead] not in ",\n":
-            if simai_text[lookahead] == "[":
-                paren_depth += 1
-            elif simai_text[lookahead] == "]":
-                paren_depth -= 1
-            elif simai_text[lookahead] == "/" and paren_depth == 0:
-                has_slash = True
-                break
-            lookahead += 1
-
-        if has_slash:
-            # EACH notation
-            while i < len(simai_text) and simai_text[i] not in ",\n":
-                if simai_text[i] == "/":
-                    i += 1
-                    continue
-                if simai_text[i] in " \t\r":
-                    i += 1
-                    continue
-
-                # Parse single note (may return list for multiple slides)
-                parsed_notes, new_i = ChartLoader._process_single_group(simai_text, i, current_bpm)
-                if parsed_notes:
-                    # Handle both single notes and lists of notes
-                    if isinstance(parsed_notes, list):
-                        notes.extend(parsed_notes)
-                    else:
-                        notes.append(parsed_notes)
-                    i = new_i
-                else:
-                    break
-        else:
-            # Single note (may contain pseudo-EACH with backticks)
-            # Extract everything until comma
-            group_end = i
-            while group_end < len(simai_text) and simai_text[group_end] not in ",\n":
-                group_end += 1
-
-            group_text = simai_text[i:group_end]
-
-            # Split by backticks for pseudo-EACH
-            segments = group_text.split("`")
-            for segment in segments:
-                segment = segment.strip()
-                if segment:
+        # Split by backticks for pseudo-EACH
+        segments = simai_text.split("`")
+        for segment in segments:
+            segment = segment.strip()
+            if segment:
+                for subsegment in segment.split("/"):
                     # Parse note (may return list for multiple slides)
-                    parsed = ChartLoader._parse_note(segment, current_bpm)
+                    parsed = ChartLoader._parse_note(subsegment, current_bpm)
                     if parsed:
                         if isinstance(parsed, list):
+                            for note in parsed:
+                                note.pseudo_offset = offset
                             notes.extend(parsed)
                         else:
+                            parsed.pseudo_offset = offset
                             notes.append(parsed)
 
-            i = group_end
-
-        return notes, i
-
-    @staticmethod
-    def _process_single_group(simai_text: str, start_pos: int, current_bpm: float) -> tuple:
-        """
-        Parse a single note from position in simai_text.
-        Examples: 1, 2h[3:4], 3-5[8:3], A5f, Chf[1:2], 4$, 5$$, 5bx, etc.
-
-        Returns:
-            Tuple of (list of NoteData objects, new position in original text)
-
-        For multiple slides (with * separator), returns a list where:
-        - First slide is normal (with star tap head)
-        - Subsequent slides are marked with is_no_slide_head = True
-        """
-        # Extract note text from simai_text until we hit a delimiter
-        i = start_pos
-        note_text = ""
-
-        while i < len(simai_text) and simai_text[i] not in ",/\n ":
-            note_text += simai_text[i]
-            i += 1
-
-        if note_text:
-            notes = ChartLoader._parse_note(note_text, current_bpm)
-            return notes, i
-        return None, i
+            offset += 1
+        return notes
 
     @staticmethod
-    def _parse_note(note_str: str, current_bpm: float) -> Optional:
+    def _parse_note(note_str: str, current_bpm: float) -> list[NoteData] | NoteData | None:
         """
         Parse a note string and expand multiple slides into separate notes.
 
@@ -550,7 +424,7 @@ class ChartLoader:
         note = NoteData(note_type="tap", position=0, note_content=note_str)
         i = 0
 
-        # Determine note type: button (1-8, E) or touch (A-E)
+        # Determine note type: button (1-8) or touch (A-E)
         if note_str[i] in "ABCDE":
             # Touch note
             note.touch_area = note_str[i]
@@ -558,7 +432,7 @@ class ChartLoader:
 
             # Parse optional touch position (B7, E8, etc.)
             while i < len(note_str) and note_str[i].isdigit():
-                note.position = note.position * 10 + int(note_str[i])
+                note.position = int(note_str[i])
                 i += 1
 
             note.note_type = "touch"
@@ -568,8 +442,6 @@ class ChartLoader:
             i += 1
 
         # Parse modifiers in any order: h, b, x, f, $, @, !, ?
-        has_hold = False
-        has_slide = False
         dollar_count = 0
 
         while i < len(note_str) and note_str[i] != "[":
@@ -577,11 +449,30 @@ class ChartLoader:
 
             if char == "h":
                 # Hold modifier
-                has_hold = True
                 if note.note_type == "touch":
                     note.note_type = "touch_hold"
                 else:
                     note.note_type = "hold"
+
+                i += 1
+
+                i += 1  # skip opening bracket
+                hold_str = ""
+                while i < len(note_str) and note_str[i] != "]":
+                    hold_str += note_str[i]
+                    i += 1
+
+                try:
+                    note.hold_time = ChartLoader._parse_beat_value(hold_str, current_bpm)
+                except ValueError:
+                    note.hold_time = 0.0
+
+                if note.hold_time == 0.0:
+                    note.hold_time = ChartLoader._parse_beat_value("1280:1", current_bpm)
+
+                # Skip the ]
+                if i < len(note_str):
+                    i += 1
                 i += 1
 
             elif char == "b":
@@ -626,10 +517,9 @@ class ChartLoader:
                     note.is_slide_no_head_fade = True
                 i += 1
 
-            elif char == "-" or char in "^v<>Vpqszw":
+            elif char in "-^v<>Vpqszw":
                 # Slide mark - rest of notation is slide definition
                 # Handle both simple slides and multiple/chaining slides
-                has_slide = True
                 note.note_type = "slide"
 
                 # Parse the first slide track
@@ -637,54 +527,23 @@ class ChartLoader:
                     note_str, i, current_bpm
                 )
 
-                # For now, we store the first track's values
-                # In a full implementation with multiple tracks, we'd store all tracks
                 note.slide_time = first_track_duration
                 note.slide_wait_time = first_track_wait
                 note.slide_end_position = end_pos
 
-                # Find where the slide parsing ends (after the bracket and any modifiers)
-                # We need to skip past all slide tracks and find the final position
-                i, is_break = ChartLoader._skip_past_all_slide_tracks(note_str, i)
-
-                # Set break flag if found
+                # Check if its a slide break if there are "b" starting from the shapes
+                is_break = "b" in note_str[i + 1 :]
                 if is_break:
                     note.is_slide_break = True
-
+                i = len(note_str)  # Just skip over everything else
                 break
 
             else:
                 i += 1
 
-        # Parse hold duration if needed
-        if has_hold and not has_slide and i < len(note_str) and note_str[i] == "[":
-            i += 1
-            hold_str = ""
-            while i < len(note_str) and note_str[i] != "]":
-                hold_str += note_str[i]
-                i += 1
-
-            try:
-                note.hold_time = ChartLoader._parse_beat_value(hold_str, current_bpm)
-            except ValueError:
-                note.hold_time = 0.0
-
-            # Skip the ]
-            if i < len(note_str):
-                i += 1
-
         # Check for break modifier after bracket (for holds and other notes)
-        if i < len(note_str) and note_str[i] == "b":
-            if note.note_type == "hold" or note.note_type == "touch_hold":
-                note.is_break = True
-            elif note.note_type != "slide":
-                # For taps and touches, set break flag
-                note.is_break = True
-
-        # Default hold time for hold notes without duration bracket
-        if has_hold and note.hold_time == 0.0:
-            # Pseudo hold: instant judgment, treated as [1280:1] internally
-            note.hold_time = ChartLoader._parse_beat_value("1280:1", current_bpm)
+        if "b" in note_str and note.note_type != "slide" and note.note_type != "touch":
+            note.is_break = True
 
         return note
 
@@ -750,77 +609,6 @@ class ChartLoader:
                     pass
 
         return slide_duration, wait_time, end_position
-
-    @staticmethod
-    def _skip_past_all_slide_tracks(note_str: str, start_pos: int) -> tuple:
-        """
-        Skip past all slide tracks in a note string, including multiple slides with * separator.
-        Also checks for the 'b' (break) modifier after the final bracket.
-
-        Examples:
-        - "1-4[8:3]" -> position after ]
-        - "1-4[8:3]*-6[8:3]" -> position after final ]
-        - "1-4[8:3]b" -> position after b
-        - "1-4q7-2[1:2]" -> position after ] (chaining)
-
-        Args:
-            note_str: The full note string
-            start_pos: Position where the first slide direction character is
-
-        Returns:
-            Tuple of (position_after_parsing, is_break) where is_break indicates if 'b' was found
-        """
-        i = start_pos
-        is_break = False
-
-        # Process first slide track
-        while i < len(note_str) and note_str[i] in "-^v<>Vpqszw":
-            i += 1
-
-        # Skip any additional shape characters
-        while i < len(note_str) and note_str[i] in "pqVvzs":
-            i += 1
-
-        # Now we're in the middle of the first track - skip to the bracket or next marker
-        while i < len(note_str) and note_str[i] not in "[*":
-            i += 1
-
-        # Skip bracket and its contents (if present)
-        if i < len(note_str) and note_str[i] == "[":
-            i += 1
-            while i < len(note_str) and note_str[i] != "]":
-                i += 1
-            if i < len(note_str):
-                i += 1  # Skip the ]
-
-        # Handle multiple slide tracks (separated by *)
-        while i < len(note_str) and note_str[i] == "*":
-            i += 1  # Skip *
-
-            # Parse the next slide track
-            # Skip direction and shape characters
-            while i < len(note_str) and note_str[i] in "-^v<>Vpqszw":
-                i += 1
-
-            # Skip any additional shape characters
-            while i < len(note_str) and note_str[i] in "pqVvzs":
-                i += 1
-
-            # Skip to the bracket or next separator
-            while i < len(note_str) and note_str[i] not in "[*":
-                i += 1
-
-            # Skip bracket and its contents (if present)
-            if i < len(note_str) and note_str[i] == "[":
-                i += 1
-                while i < len(note_str) and note_str[i] != "]":
-                    i += 1
-                if i < len(note_str):
-                    i += 1  # Skip the ]
-
-        # Handle the 'b' modifier for break slides (comes after all brackets)
-        is_break = "b" in note_str
-        return i, is_break
 
     @staticmethod
     def _parse_beat_value(beat_str: str, current_bpm: float = 120.0) -> float:
@@ -932,6 +720,7 @@ class ChartLoader:
                 bpm = float(bpm_str)
                 wait_time = 60.0 / bpm  # 1 beat at specified BPM
             except ValueError:
+                bpm = current_bpm
                 wait_time = time_one_beat
 
             # Parse slide duration

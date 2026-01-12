@@ -9,7 +9,7 @@ Converts note timing into sound effect events based on:
 
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict
-from mai_renderer.chart_loader import Chart, TimingPoint
+from mai_renderer.simai.loader import Chart, TimingPoint
 
 
 @dataclass

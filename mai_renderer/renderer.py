@@ -10,219 +10,16 @@ from pprint import pprint
 import sys
 from pathlib import Path
 from typing import Optional, cast, List
-from mai_renderer.chart_loader import ChartLoader, Chart
+from mai_renderer.simai.loader import ChartLoader, Chart
+from mai_renderer.majdata.json import MajdataMajson, generate_majson
 from mai_renderer.sound_timing import SoundTimingGenerator
 from mai_renderer.audio_processor import AudioProcessor
 from mai_renderer.config import SOUND_EFFECTS
-from mai_renderer.majdataview_ipc import (
+from mai_renderer.majdata.ipc import (
     MajdataViewIPC,
     EditorPlayMethod,
     EditorComboIndicator,
 )
-
-
-class SimaiNoteType(Enum):
-    """Simai note type enumeration"""
-
-    Tap = 0
-    Slide = 1
-    Hold = 2
-    Touch = 3
-    TouchHold = 4
-
-
-@dataclass
-class SimaiNote:
-    """Represents a single note in Simai format"""
-
-    holdTime: float = 0.0
-    isBreak: bool = False
-    isEx: bool = False
-    isFakeRotate: bool = False
-    isForceStar: bool = False
-    isHanabi: bool = False
-    isSlideBreak: bool = False
-    isSlideNoHead: bool = False
-    noteContent: Optional[str] = None
-    noteType: SimaiNoteType = SimaiNoteType.Tap
-    slideStartTime: float = 0.0
-    slideTime: float = 0.0
-    startPosition: int = 1
-    touchArea: str = " "
-
-    def to_dict(self) -> dict:
-        """Convert to JSON-serializable dict"""
-        d = asdict(self)
-        d["noteType"] = self.noteType.name
-        return d
-
-
-@dataclass
-class SimaiTimingPoint:
-    """Represents a timing point (note group) in Simai format"""
-
-    currentBpm: float = -1.0
-    havePlayed: bool = False
-    HSpeed: float = 1.0
-    noteList: List[SimaiNote] = field(default_factory=list)
-    notesContent: str = ""
-    rawTextPositionX: int = 0
-    rawTextPositionY: int = 0
-    time: float = 0.0
-
-    def to_dict(self) -> dict:
-        """Convert to JSON-serializable dict"""
-        d = asdict(self)
-        d["noteList"] = [note.to_dict() for note in self.noteList]
-        return d
-
-
-@dataclass
-class Majson:
-    """Represents a complete Maimai chart in JSON format"""
-
-    artist: str = "default"
-    designer: str = "default"
-    difficulty: str = "EASY"
-    diffNum: int = 0
-    level: str = "1"
-    timingList: List[SimaiTimingPoint] = field(default_factory=list)
-    title: str = "default"
-
-    @staticmethod
-    def get_difficulty_text(index: int) -> str:
-        """Convert difficulty index to text"""
-        difficulty_map = {
-            0: "EASY",
-            1: "BASIC",
-            2: "ADVANCED",
-            3: "EXPERT",
-            4: "MASTER",
-            5: "Re:MASTER",
-            6: "ORIGINAL",
-        }
-        return difficulty_map.get(index, "DEFAULT")
-
-    def to_dict(self) -> dict:
-        """Convert to JSON-serializable dict"""
-        return {
-            "artist": self.artist,
-            "designer": self.designer,
-            "difficulty": self.difficulty,
-            "diffNum": self.diffNum,
-            "level": self.level,
-            "timingList": [tp.to_dict() for tp in self.timingList],
-            "title": self.title,
-        }
-
-    def to_json(self) -> str:
-        """Convert to JSON string"""
-        return json.dumps(self.to_dict(), indent=2)
-
-
-def _build_note_content(note_data) -> str:
-    """
-    Build simai notation string from NoteData, cleaning up modifiers.
-
-    Removes modifiers from the original note_content string:
-    - Removes "!" and "?" (slide no-head markers)
-    - Removes "b" (break marker)
-    - Removes "$" (star-shaped tap markers)
-    - Removes "x" (EX marker)
-
-    This matches the behavior of SimaiProcess.cs getSingleNote()
-    """
-    content = note_data.note_content
-    if not content:
-        return ""
-
-    # Remove modifiers in order, matching SimaiProcess.cs logic
-    content = content.replace("!", "")
-    content = content.replace("?", "")
-    content = content.replace("b", "")
-    content = content.replace("$", "")
-    content = content.replace("x", "")
-
-    return content
-
-
-def generate_majson(chart: Chart, diff_num: int = 0, level: str = "1") -> Majson:
-    """
-    Generate Majson from parsed Chart object
-
-    Args:
-        chart: Chart object from ChartLoader
-        diff_num: Difficulty index (0-6)
-        level: Level as string (e.g., "1", "10+")
-
-    Returns:
-        Majson object ready for JSON serialization
-    """
-    majson = Majson(
-        title=chart.metadata.title,
-        artist=chart.metadata.artist,
-        designer=chart.metadata.designer,
-        diffNum=diff_num,
-        difficulty=Majson.get_difficulty_text(diff_num),
-        level=level,
-    )
-
-    # Get timing points for this difficulty
-    if diff_num not in chart.difficulty_charts:
-        return majson
-
-    timing_points = chart.difficulty_charts[diff_num]
-
-    # Convert timing points
-    for timing_point in timing_points:
-        simai_tp = SimaiTimingPoint(
-            time=timing_point.time,
-            currentBpm=timing_point.bpm,
-            rawTextPositionX=timing_point.raw_text_position_x,
-            rawTextPositionY=timing_point.raw_text_position_y,
-        )
-
-        # Convert notes
-        for note_data in timing_point.notes:
-            note_type_map = {
-                "tap": SimaiNoteType.Tap,
-                "hold": SimaiNoteType.Hold,
-                "slide": SimaiNoteType.Slide,
-                "touch": SimaiNoteType.Touch,
-                "touch_hold": SimaiNoteType.TouchHold,
-            }
-
-            # Build noteContent from NoteData
-            note_content = _build_note_content(note_data)
-
-            # Calculate slide start time (when slide animation begins)
-            # = timing point time + wait time before slide starts
-            slide_start_time = timing_point.time + note_data.slide_wait_time if note_data.note_type == "slide" else 0.0
-
-            # prev = None
-            if note_data.is_no_slide_head:
-                print(prev)
-            prev = note_data, note_content
-
-            simai_note = SimaiNote(
-                noteType=note_type_map.get(note_data.note_type, SimaiNoteType.Tap),
-                startPosition=note_data.position,
-                holdTime=note_data.hold_time,
-                isBreak=note_data.is_break,
-                isEx=note_data.is_ex,
-                isHanabi=note_data.is_hanabi,
-                isSlideNoHead=note_data.is_no_slide_head,
-                isSlideBreak=note_data.is_slide_break,
-                slideTime=note_data.slide_time,
-                slideStartTime=slide_start_time,
-                touchArea=note_data.touch_area or " ",
-                noteContent=note_content,
-            )
-            simai_tp.noteList.append(simai_note)
-
-        majson.timingList.append(simai_tp)
-
-    return majson
 
 
 class Renderer:
@@ -489,14 +286,16 @@ def main():
     # Create renderer and load chart
     renderer = Renderer(args.maidata_dir, sfx_dir)
 
-    if not renderer.load_chart():
+    if not renderer.load_chart() or not renderer.chart:
         return 1
 
     # Validate difficulty exists
     if args.difficulty not in renderer.chart.difficulty_charts:
         available = sorted(renderer.chart.difficulty_charts.keys())
-        difficulty_names = [Majson.get_difficulty_text(i) for i in available]
-        print(f"Error: Difficulty {args.difficulty} ({Majson.get_difficulty_text(args.difficulty)}) not found in chart")
+        difficulty_names = [MajdataMajson.get_difficulty_text(i) for i in available]
+        print(
+            f"Error: Difficulty {args.difficulty} ({MajdataMajson.get_difficulty_text(args.difficulty)}) not found in chart"
+        )
         print(f"Available difficulties: {', '.join(f'{i}={difficulty_names[j]}' for j, i in enumerate(available))}")
         return 1
 
