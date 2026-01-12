@@ -164,8 +164,6 @@ class Renderer:
         if not self.generate_majdata_json(diff_num=diff_num, level=level):
             return False
 
-        pprint(self.chart.difficulty_charts[diff_num][0].notes[:8])
-        # exit()
         # Generate sound effect timings
         print("Generating sound effect timings...")
         timings = SoundTimingGenerator.generate(
