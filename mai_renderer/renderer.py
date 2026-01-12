@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import Optional, cast, List
 from mai_renderer.simai.loader import ChartLoader, Chart
 from mai_renderer.majdata.json import MajdataMajson, generate_majson
-from mai_renderer.sound_timing import SoundTimingGenerator
-from mai_renderer.audio_processor import AudioProcessor
+from mai_renderer.sound.timing import SoundTimingGenerator
+from mai_renderer.sound.render import AudioProcessor
 from mai_renderer.config import SOUND_EFFECTS
 from mai_renderer.majdata.ipc import (
     MajdataViewIPC,
