@@ -128,7 +128,6 @@ class Renderer:
         self,
         output_file: str = "out.wav",
         start_time: float = 0.0,
-        include_op: bool = True,
         delay_seconds: float = 5.0,
         volumes: Optional[dict] = None,
         diff_num: int = 0,
@@ -170,7 +169,10 @@ class Renderer:
         # Generate sound effect timings
         print("Generating sound effect timings...")
         timings = SoundTimingGenerator.generate(
-            self.chart, start_time=start_time, include_op=include_op, diff_num=diff_num
+            self.chart,
+            start_time=start_time,
+            include_op=True,
+            diff_num=diff_num,
         )
         print(f"Generated {len(timings)} sound effect timings")
 
@@ -267,7 +269,6 @@ def main():
         sfx_dir: str = "SFX"  # Directory containing sound effects
         output: str = "out.wav"  # Output WAV filename
         difficulty: int = 0  # Difficulty index (0-6)
-        no_op: bool = False  # Exclude opening/intro sounds
         delay: float = 5.0  # Delay before chart starts in seconds
 
         def configure(self):
@@ -312,7 +313,10 @@ def main():
 
         # Render with fixed output and delay for recording
         if not renderer.render(
-            output_file="out.wav", include_op=not args.no_op, delay_seconds=5.0, diff_num=args.difficulty, level=level
+            output_file="out.wav",
+            delay_seconds=5.0,
+            diff_num=args.difficulty,
+            level=level,
         ):
             return 1
 
@@ -337,7 +341,6 @@ def main():
         # Normal audio rendering
         if not renderer.render(
             output_file=args.output,
-            include_op=not args.no_op,
             delay_seconds=args.delay,
             diff_num=args.difficulty,
             level=level,
