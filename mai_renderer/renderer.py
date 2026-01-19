@@ -268,6 +268,8 @@ def main():
         output: str = "out.wav"  # Output WAV filename
         difficulty: int = 0  # Difficulty index (0-6)
         delay: float = 5.0  # Delay before chart starts in seconds
+        bgm_volume: float = 1.0  # BGM volume (0.0-1.0)
+        sfx_volume: float = 1.0  # SFX volume (0.0-1.0)
 
         def configure(self):
             self.add_subparsers(dest="command")
@@ -337,11 +339,16 @@ def main():
             return 1
     else:
         # Normal audio rendering
+        volumes = {
+            "bgm": args.bgm_volume,
+            "sfx": args.sfx_volume,
+        }
         if not renderer.render(
             output_file=args.output,
             delay_seconds=args.delay,
             diff_num=args.difficulty,
             level=level,
+            volumes=volumes,
         ):
             return 1
 

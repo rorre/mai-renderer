@@ -8,10 +8,20 @@ import os
 import struct
 import wave
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TypedDict
 import numpy as np
 import soundfile as sf
 from scipy import signal
+
+
+VolumeSettings = TypedDict(
+    "VolumeSettings",
+    {
+        "bgm": float,
+        "sfx": float,
+    },
+    total=False,
+)
 
 
 class AudioProcessor:
@@ -113,7 +123,7 @@ class AudioProcessor:
         sound_timings: List,
         output_path: str,
         delay_seconds: float = 5.0,
-        volumes: Optional[Dict[str, float]] = None,
+        volumes: Optional[VolumeSettings] = None,
     ) -> bool:
         """
         Render final audio with BGM and sound effects combined
@@ -181,7 +191,7 @@ class AudioProcessor:
             for effect_name, volume in effects:
                 if effect_name in self.sound_banks:
                     effect_data = self.sound_banks[effect_name]
-                    effect_vol = volumes.get(effect_name, 1.0) * volume
+                    effect_vol = volumes.get("sfx", 1.0) * volume
 
                     # For touch_hold, crop the sound to match the hold duration
                     if effect_name == "touch_hold" and timing.touch_hold_duration > 0:
