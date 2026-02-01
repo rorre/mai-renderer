@@ -566,29 +566,14 @@ class ChartLoader:
         i = start_pos
         end_position = 0
 
-        # Skip past direction and shape characters
-        if i < len(note_str) and note_str[i] in "-^v<>Vpqszw":
-            i += 1
-
-        # Skip any additional shape characters (e.g., 'pp' for grand p-shape, 'qq' for grand q-shape)
-        while i < len(note_str) and note_str[i] in "pqVvzs":
-            i += 1
-
         # Find the end position (last digit before [ or * or end of string)
-        last_digit_pos = -1
         temp_i = i
         while temp_i < len(note_str) and note_str[temp_i] not in "[*":
             if note_str[temp_i].isdigit():
-                last_digit_pos = temp_i
                 end_position = int(note_str[temp_i])
             temp_i += 1
 
-        # Skip to after the end position
-        if last_digit_pos >= 0:
-            i = last_digit_pos + 1
-
-        # Skip any @ modifiers on the end position
-        if i < len(note_str) and note_str[i] == "@":
+        while i < len(note_str) and (note_str[i] in "-^v<>VpqszwbxpqVvzs@" or note_str[i].isdigit()):
             i += 1
 
         # Parse slide timing in brackets if present
@@ -603,11 +588,10 @@ class ChartLoader:
                 i += 1
 
             if timing_str:
-                try:
-                    slide_duration, wait_time = ChartLoader._parse_slide_timing(timing_str, current_bpm)
-                except ValueError:
-                    pass
+                slide_duration, wait_time = ChartLoader._parse_slide_timing(timing_str, current_bpm)
 
+        if slide_duration == 0:
+            raise ValueError(f"Missing slide duration: {note_str}")
         return slide_duration, wait_time, end_position
 
     @staticmethod
@@ -679,35 +663,29 @@ class ChartLoader:
             duration_str = parts[1].strip() if len(parts) > 1 else ""
 
             # Parse wait time (in seconds)
-            try:
-                wait_time = float(wait_str)
-            except ValueError:
-                wait_time = time_one_beat
+            wait_time = float(wait_str)
 
             # Parse duration
             if duration_str:
                 if "#" in duration_str:
                     # BPM specified for duration: "160#8:3"
                     bpm_parts = duration_str.split("#", 1)
-                    try:
-                        bpm = float(bpm_parts[0])
-                        beat_part = bpm_parts[1] if len(bpm_parts) > 1 else ""
-                        if ":" in beat_part:
-                            slide_duration = ChartLoader._parse_beat_value(beat_part, bpm)
-                        else:
-                            # Direct seconds value
-                            slide_duration = float(beat_part)
-                    except ValueError:
-                        slide_duration = 0.0
+
+                    bpm = float(bpm_parts[0])
+                    beat_part = bpm_parts[1] if len(bpm_parts) > 1 else ""
+                    if ":" in beat_part:
+                        slide_duration = ChartLoader._parse_beat_value(beat_part, bpm)
+                    else:
+                        # Direct seconds value
+                        slide_duration = float(beat_part)
+
                 else:
                     # No BPM, check if beat notation or seconds
                     if ":" in duration_str:
                         slide_duration = ChartLoader._parse_beat_value(duration_str, current_bpm)
                     else:
-                        try:
-                            slide_duration = float(duration_str)
-                        except ValueError:
-                            slide_duration = 0.0
+                        slide_duration = float(duration_str)
+                        
 
         # Check for # separator (BPM specification)
         elif "#" in timing_str:
@@ -716,33 +694,23 @@ class ChartLoader:
             duration_str = parts[1].strip() if len(parts) > 1 else ""
 
             # Parse BPM for wait time
-            try:
-                bpm = float(bpm_str)
-                wait_time = 60.0 / bpm  # 1 beat at specified BPM
-            except ValueError:
-                bpm = current_bpm
-                wait_time = time_one_beat
+            bpm = float(bpm_str)
+            wait_time = 60.0 / bpm  # 1 beat at specified BPM
 
             # Parse slide duration
             if duration_str:
                 if ":" in duration_str:
-                    # Beat notation at the BPM we just parsed
+                    # BPM#BeatValue
                     slide_duration = ChartLoader._parse_beat_value(duration_str, bpm)
                 else:
-                    # Try as seconds first
-                    try:
-                        slide_duration = float(duration_str)
-                    except ValueError:
-                        slide_duration = 0.0
+                    # BPM#DurationSeconds
+                    slide_duration = float(duration_str)
 
         else:
             # Simple format: just duration, default wait 1 beat
             if ":" in timing_str:
                 slide_duration = ChartLoader._parse_beat_value(timing_str, current_bpm)
             else:
-                try:
-                    slide_duration = float(timing_str)
-                except ValueError:
-                    slide_duration = 0.0
+                raise ValueError(f"Invalid slide timing: {timing_str}")
 
         return slide_duration, wait_time
