@@ -4,9 +4,11 @@ I need a maimai renderer that can work on Linux
 
 **You need MajdataView to be running to record.** It's trivial to port MajdataView to Linux. I'll post some of my changes in a fork later.
 
-## EVERYTHING HERE IS VIBE CODED!!!!!!!!
+## ~~EVERYTHING HERE IS VIBE CODED!!!!!!!!~~
 
-It probably doesn't work properly, though tbh the code for the parsing isn't that bad... I wouldn't have gone parsing it character by character though
+~~It probably doesn't work properly, though tbh the code for the parsing isn't that bad... I wouldn't have gone parsing it character by character though~~
+
+no more its partially vibed now
 
 ```
 usage: main.py --maidata_dir MAIDATA_DIR [--sfx_dir SFX_DIR] [--output OUTPUT] [--difficulty DIFFICULTY] [--no_op] [--delay DELAY] [-h] {record} ...
