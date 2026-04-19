@@ -108,7 +108,7 @@ class ChartLoader:
                 i += 1
                 continue
 
-            if line.startswith("&des="):
+            if line.startswith("&des"):
                 metadata.designer = ChartLoader._get_value(line)
                 i += 1
                 continue
