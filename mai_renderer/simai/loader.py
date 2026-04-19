@@ -347,6 +347,7 @@ class ChartLoader:
                     slide_wait_time=base_wait_time,
                     slide_end_position=ChartLoader._extract_end_position(part),
                     is_no_slide_head=True,  # Subsequent slides have no head
+                    is_slide_break="b" in part
                 )
                 slides.append(subsequent_slide)
 
