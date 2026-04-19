@@ -146,7 +146,7 @@ def generate_majson(chart: Chart, diff_num: int = 0, level: str = "1") -> Majdat
     majson = MajdataMajson(
         title=chart.metadata.title,
         artist=chart.metadata.artist,
-        designer=chart.metadata.designer,
+        designer=chart.metadata.level_designer[diff_num],
         diffNum=diff_num,
         difficulty=MajdataMajson.get_difficulty_text(diff_num),
         level=level,

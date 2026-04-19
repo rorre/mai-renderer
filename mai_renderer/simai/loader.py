@@ -61,6 +61,7 @@ class ChartMetadata:
     # 5: "Re:MASTER",
     # 6: "ORIGINAL",
     levels: List[str] = field(default_factory=lambda: [""] * 7)
+    level_designer: List[str] = field(default_factory=lambda: [""] * 7)
     other_commands: str = ""
 
 
@@ -109,7 +110,14 @@ class ChartLoader:
                 continue
 
             if line.startswith("&des"):
-                metadata.designer = ChartLoader._get_value(line)
+                if metadata.designer == "default":
+                    metadata.designer = ChartLoader._get_value(line)
+                
+                match = re.match(r"&des_(\d)=(.+)", line)
+                if match:
+                    level_idx = int(match.group(1)) - 1
+                    if 0 <= level_idx < 7:
+                        metadata.level_designer[level_idx] = match.group(2)
                 i += 1
                 continue
 
